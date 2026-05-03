@@ -5,7 +5,11 @@ const cors    = require('cors');
 const app = express();
 
 // ── Middlewares globales ──────────────────────────────────────
-app.use(cors());                    // permite peticiones desde el frontend
+app.use(cors({
+  origin: ["https://dojang-frontend.vercel.app", "http://localhost:3001", "http://127.0.0.1:5500"],
+  methods: ["GET","POST","PUT","DELETE"],
+  allowedHeaders: ["Content-Type","Authorization"]
+}));                    // permite peticiones desde el frontend
 app.use(express.json());            // parsear JSON en el body
 
 // ── Rutas ─────────────────────────────────────────────────────
