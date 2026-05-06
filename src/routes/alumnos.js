@@ -18,9 +18,14 @@ router.get('/publico', async (req, res) => {
 router.post('/registro-completo', auth, allow('admin','instructor'), async (req, res) => {
   const { num_control, nombre, fecha_nacimiento, id_cinta_actual,
           responsable_nombre, responsable_telefono, responsable_direccion,
-          username, password } = req.body;
+          username, password,
+          // Nuevos campos del alumno
+          email, direccion, tipo_sangre,
+          contacto_emergencia, tel_emergencia, notas_medicas } = req.body;
+
   if (!num_control || !nombre || !fecha_nacimiento || !responsable_nombre || !username || !password)
     return res.status(400).json({ error: 'Faltan campos obligatorios' });
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -30,11 +35,17 @@ router.post('/registro-completo', auth, allow('admin','instructor'), async (req,
        VALUES ($1, $2, $3, $4) ON CONFLICT (num_control) DO NOTHING`,
       [resp_id, responsable_nombre, responsable_telefono || '', responsable_direccion || '']
     );
+
     const { rows: alumnoRows } = await client.query(
-      `INSERT INTO alumnos (num_control, nombre, fecha_nacimiento, id_cinta_actual, num_control_responsable)
-       VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-      [num_control, nombre, fecha_nacimiento, id_cinta_actual || 1, resp_id]
+      `INSERT INTO alumnos
+         (num_control, nombre, fecha_nacimiento, id_cinta_actual, num_control_responsable,
+          email, direccion, tipo_sangre, contacto_emergencia, tel_emergencia, notas_medicas)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+      [num_control, nombre, fecha_nacimiento, id_cinta_actual || 1, resp_id,
+       email || null, direccion || null, tipo_sangre || null,
+       contacto_emergencia || null, tel_emergencia || null, notas_medicas || null]
     );
+
     const bcrypt = require('bcrypt');
     const hash = await bcrypt.hash(password, 10);
     await client.query(
@@ -123,16 +134,25 @@ router.post('/', auth, allow('admin','instructor'), async (req, res) => {
 
 // PUT /api/alumnos/:id
 router.put('/:id', auth, allow('admin','instructor'), async (req, res) => {
-  const { nombre, fecha_nacimiento, id_cinta_actual, num_control_responsable } = req.body;
+  const { nombre, fecha_nacimiento, id_cinta_actual,
+          email, direccion, tipo_sangre,
+          contacto_emergencia, tel_emergencia, notas_medicas } = req.body;
   try {
     const { rows } = await pool.query(
-      `UPDATE alumnos SET nombre=$1, fecha_nacimiento=$2, id_cinta_actual=$3,
-        num_control_responsable=$4 WHERE num_control=$5 RETURNING *`,
-      [nombre, fecha_nacimiento, id_cinta_actual, num_control_responsable, req.params.id]
+      `UPDATE alumnos
+       SET nombre=$1, fecha_nacimiento=$2, id_cinta_actual=$3,
+           email=$4, direccion=$5, tipo_sangre=$6,
+           contacto_emergencia=$7, tel_emergencia=$8, notas_medicas=$9
+       WHERE num_control=$10 RETURNING *`,
+      [nombre, fecha_nacimiento, id_cinta_actual,
+       email || null, direccion || null, tipo_sangre || null,
+       contacto_emergencia || null, tel_emergencia || null, notas_medicas || null,
+       req.params.id]
     );
     if (!rows.length) return res.status(404).json({ error: 'Alumno no encontrado' });
     res.json(rows[0]);
   } catch (err) {
+    console.error(err);
     res.status(500).json({ error: 'Error al actualizar alumno' });
   }
 });
@@ -143,7 +163,6 @@ router.delete('/:id', auth, allow('admin'), async (req, res) => {
   try {
     await client.query('BEGIN');
 
-    // 1. Obtener el responsable y usuario vinculados a este alumno
     const { rows: alumnoRows } = await client.query(
       `SELECT num_control_responsable FROM alumnos WHERE num_control = $1`,
       [req.params.id]
@@ -154,24 +173,19 @@ router.delete('/:id', auth, allow('admin'), async (req, res) => {
     }
     const resp_id = alumnoRows[0].num_control_responsable;
 
-    // 2. Borrar al alumno
     await client.query('DELETE FROM alumnos WHERE num_control = $1', [req.params.id]);
 
-    // 3. ¿El responsable tiene otros alumnos?
     const { rows: otrosAlumnos } = await client.query(
       `SELECT 1 FROM alumnos WHERE num_control_responsable = $1 LIMIT 1`,
       [resp_id]
     );
 
-    // 4. Si ya no tiene más alumnos, borrar su usuario y el responsable
     if (otrosAlumnos.length === 0) {
       await client.query(
-        `DELETE FROM usuarios WHERE num_control_responsable = $1`,
-        [resp_id]
+        `DELETE FROM usuarios WHERE num_control_responsable = $1`, [resp_id]
       );
       await client.query(
-        `DELETE FROM responsables WHERE num_control = $1`,
-        [resp_id]
+        `DELETE FROM responsables WHERE num_control = $1`, [resp_id]
       );
     }
 
