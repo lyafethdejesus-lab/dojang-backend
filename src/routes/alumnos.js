@@ -139,11 +139,50 @@ router.put('/:id', auth, allow('admin','instructor'), async (req, res) => {
 
 // DELETE /api/alumnos/:id
 router.delete('/:id', auth, allow('admin'), async (req, res) => {
+  const client = await pool.connect();
   try {
-    await pool.query('DELETE FROM alumnos WHERE num_control=$1', [req.params.id]);
+    await client.query('BEGIN');
+
+    // 1. Obtener el responsable y usuario vinculados a este alumno
+    const { rows: alumnoRows } = await client.query(
+      `SELECT num_control_responsable FROM alumnos WHERE num_control = $1`,
+      [req.params.id]
+    );
+    if (!alumnoRows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Alumno no encontrado' });
+    }
+    const resp_id = alumnoRows[0].num_control_responsable;
+
+    // 2. Borrar al alumno
+    await client.query('DELETE FROM alumnos WHERE num_control = $1', [req.params.id]);
+
+    // 3. ¿El responsable tiene otros alumnos?
+    const { rows: otrosAlumnos } = await client.query(
+      `SELECT 1 FROM alumnos WHERE num_control_responsable = $1 LIMIT 1`,
+      [resp_id]
+    );
+
+    // 4. Si ya no tiene más alumnos, borrar su usuario y el responsable
+    if (otrosAlumnos.length === 0) {
+      await client.query(
+        `DELETE FROM usuarios WHERE num_control_responsable = $1`,
+        [resp_id]
+      );
+      await client.query(
+        `DELETE FROM responsables WHERE num_control = $1`,
+        [resp_id]
+      );
+    }
+
+    await client.query('COMMIT');
     res.json({ mensaje: 'Alumno eliminado' });
   } catch (err) {
+    await client.query('ROLLBACK');
+    console.error(err);
     res.status(500).json({ error: 'Error al eliminar alumno' });
+  } finally {
+    client.release();
   }
 });
 
