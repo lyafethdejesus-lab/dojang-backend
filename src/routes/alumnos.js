@@ -97,4 +97,53 @@ router.delete('/:id', auth, allow('admin'), async (req, res) => {
   }
 });
 
+// POST /api/alumnos/registro-completo — crea responsable + alumno + usuario
+router.post('/registro-completo', auth, allow('admin','instructor'), async (req, res) => {
+  const { num_control, nombre, fecha_nacimiento, id_cinta_actual,
+          responsable_nombre, responsable_telefono, responsable_direccion,
+          username, password } = req.body;
+
+  if (!num_control || !nombre || !fecha_nacimiento || !responsable_nombre || !username || !password)
+    return res.status(400).json({ error: 'Faltan campos obligatorios' });
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 1. Crear responsable con el mismo num_control del alumno como PK
+    const resp_id = `RESP-${num_control}`;
+    await client.query(
+      `INSERT INTO responsables (num_control, nombre, telefono, direccion)
+       VALUES ($1, $2, $3, $4) ON CONFLICT (num_control) DO NOTHING`,
+      [resp_id, responsable_nombre, responsable_telefono || '', responsable_direccion || '']
+    );
+
+    // 2. Crear alumno
+    const { rows: alumnoRows } = await client.query(
+      `INSERT INTO alumnos (num_control, nombre, fecha_nacimiento, id_cinta_actual, num_control_responsable)
+       VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+      [num_control, nombre, fecha_nacimiento, id_cinta_actual || 1, resp_id]
+    );
+
+    // 3. Crear usuario con bcrypt
+    const bcrypt = require('bcrypt');
+    const hash = await bcrypt.hash(password, 10);
+    await client.query(
+      `INSERT INTO usuarios (username, password, rol, num_control_responsable)
+       VALUES ($1, $2, 'responsable', $3)`,
+      [username, hash, resp_id]
+    );
+
+    await client.query('COMMIT');
+    res.status(201).json({ alumno: alumnoRows[0], message: 'Alumno registrado correctamente' });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    if (err.code === '23505') return res.status(409).json({ error: 'El ID o usuario ya existe' });
+    console.error(err);
+    res.status(500).json({ error: 'Error al registrar alumno' });
+  } finally {
+    client.release();
+  }
+});
+
 module.exports = router;

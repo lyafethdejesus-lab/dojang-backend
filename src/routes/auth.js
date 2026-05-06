@@ -42,4 +42,22 @@ router.post('/login', async (req, res) => {
   }
 });
 
+// POST /api/auth/cambiar-pass — alumno cambia su contraseña en primer acceso
+router.post('/cambiar-pass', auth, async (req, res) => {
+  const { nuevaPassword } = req.body;
+  if (!nuevaPassword || nuevaPassword.length < 4)
+    return res.status(400).json({ error: 'Contraseña muy corta' });
+  try {
+    const bcrypt = require('bcrypt');
+    const hash = await bcrypt.hash(nuevaPassword, 10);
+    await pool.query(
+      `UPDATE usuarios SET password=$1 WHERE username=$2`,
+      [hash, req.user.username]
+    );
+    res.json({ ok: true });
+  } catch(err) {
+    res.status(500).json({ error: 'Error al cambiar contraseña' });
+  }
+});
+
 module.exports = router;
