@@ -55,6 +55,24 @@ router.post('/registro-completo', auth, allow('admin','instructor'), async (req,
       [username, hash, resp_id]
     );
     await client.query('COMMIT');
+
+    // Crear primer pago de mensualidad automáticamente
+    const hoy = new Date();
+    const MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+    const mesActual = MESES[hoy.getMonth()];
+    const anioActual = hoy.getFullYear();
+    try {
+      const pagoRes = await pool.query(
+        `INSERT INTO pagos (monto_total, monto_abonado, fecha_pago, metodo_pago, tipo_pago, estado_pago, num_control_responsable)
+         VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id_pago`,
+        [500, 500, hoy.toISOString().split('T')[0], 'Efectivo', 'Mensualidad', 'Liquidado', resp_id]
+      );
+      await pool.query(
+        `INSERT INTO mensualidades (id_pago, mes_correspondiente, anio) VALUES ($1,$2,$3)`,
+        [pagoRes.rows[0].id_pago, mesActual, anioActual]
+      );
+    } catch(pagoErr) { console.log('Aviso: no se pudo crear pago inicial:', pagoErr.message); }
+
     res.status(201).json({ alumno: alumnoRows[0], message: 'Alumno registrado correctamente' });
   } catch (err) {
     await client.query('ROLLBACK');
