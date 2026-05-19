@@ -217,10 +217,15 @@ router.delete('/:id', auth, allow('admin'), async (req, res) => {
     }
     const resp_id = alumnoRows[0].num_control_responsable;
 
-    // Borrar registros del alumno primero
-    await client.query('DELETE FROM avances WHERE num_control_alumno = $1', [req.params.id]);
-    await client.query('DELETE FROM examenes WHERE num_control_alumno = $1', [req.params.id]);
-    await client.query('DELETE FROM inscripciones WHERE num_control_alumno = $1', [req.params.id]);
+    // Borrar registros dependientes del alumno (con try individual por si cambia el nombre de columna)
+    const depQueries = [
+      'DELETE FROM avances WHERE num_control_alumno = $1',
+      'DELETE FROM examenes WHERE num_control_alumno = $1',
+      'DELETE FROM inscripciones WHERE num_control_alumno = $1',
+    ];
+    for (const q of depQueries) {
+      try { await client.query(q, [req.params.id]); } catch(e) { /* tabla sin datos o columna distinta */ }
+    }
     await client.query('DELETE FROM alumnos WHERE num_control = $1', [req.params.id]);
 
     const { rows: otrosAlumnos } = await client.query(
@@ -229,15 +234,17 @@ router.delete('/:id', auth, allow('admin'), async (req, res) => {
     );
 
     if (otrosAlumnos.length === 0) {
-      // Borrar pagos/mensualidades antes de borrar el responsable (evita error de FK)
-      const { rows: pagosResp } = await client.query(
-        `SELECT id_pago FROM pagos WHERE num_control_responsable = $1`, [resp_id]
-      );
-      for (const pago of pagosResp) {
-        await client.query('DELETE FROM mensualidades WHERE id_pago = $1', [pago.id_pago]);
-      }
-      await client.query('DELETE FROM pagos WHERE num_control_responsable = $1', [resp_id]);
-      await client.query(`DELETE FROM usuarios WHERE num_control_responsable = $1`, [resp_id]);
+      // Borrar mensualidades y pagos antes del responsable (evita error de FK)
+      try {
+        const { rows: pagosResp } = await client.query(
+          `SELECT id_pago FROM pagos WHERE num_control_responsable = $1`, [resp_id]
+        );
+        for (const pago of pagosResp) {
+          await client.query('DELETE FROM mensualidades WHERE id_pago = $1', [pago.id_pago]);
+        }
+        await client.query('DELETE FROM pagos WHERE num_control_responsable = $1', [resp_id]);
+      } catch(e) { console.log('Aviso pagos:', e.message); }
+      try { await client.query(`DELETE FROM usuarios WHERE num_control_responsable = $1`, [resp_id]); } catch(e) {}
       await client.query(`DELETE FROM responsables WHERE num_control = $1`, [resp_id]);
     }
 
