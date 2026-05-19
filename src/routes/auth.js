@@ -13,7 +13,7 @@ router.post('/login', async (req, res) => {
 
   try {
     const { rows } = await pool.query(
-      'SELECT * FROM usuarios WHERE username = $1', [username]
+      'SELECT * FROM usuarios WHERE LOWER(username) = LOWER($1)', [username]
     );
     if (!rows.length)
       return res.status(401).json({ error: 'Usuario o contraseña incorrectos' });
